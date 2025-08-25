@@ -4,33 +4,34 @@ FunctionFormer2 is a self-healing autocoder that turns a high-level goal into a 
 It plans an outline, generates the code section-by-section, runs pre-flight fixes, executes the program in a sandboxed subprocess, and iteratively repairs issues using your feedback.
 
 
-This repo ships two launchers:
+This has 3 versions:
 
-ff2_mistral7b.py — local, offline(ish) build targeting Mistral 7B Instruct v0.3
+ff2_chatgpt.py — build targeting OpenAI ChatGPT models through the online API - Runs on ANY computer with internet.
 
-ff2_chatgpt.py — API build targeting OpenAI ChatGPT models
+ff2_mistral7b.py — local, offline build targeting Mistral 7B Instruct v0.3 - Requires around 10GB of RAM, no Graphics Card required. Runs faster if your computer has a Graphics Card, especially if the Graphics Card can fit everything instead of splitting the model between GPU and RAM. 
 
-⚠️ You’ll also need two helper modules placed next to the ff2_*.py file you run:
+ff2_qwen14b.py - local, offline build targeting Qwen2.5 14B Instruct - Requires around 25GB of RAM, no Graphics Card required. Like the Mistral version, the more of the model that you can fit on a graphics card, the faster it will run.
 
-Overload.py (a lightweight, layer-wise runner / fallback engine)
+
+⚠️ You’ll also need one helper module file placed next to the ff2_*.py file you run:
 
 LLM_Reasoning_Engine.py (small “planning/critique” helper)
 
-These are pulled from their own repos on my Github page. Drop the files in the same folder as ff2_mistral7b.py / ff2_chatgpt.py.
+This can be found in the LLM_Reasoning_Engine repo on my Github page. Drop the py file in the same folder as ff2_chatgpt.py / ff2_mistral7b.py / ff2_qwen14b.py.
 
 
 
 ✨ What it does
 
-Interview → Outline → Code: asks a few clarifying questions, produces a structured outline, then generates imports, globals, functions, and main in small passes.
+Interview → Outline → Code → Critique → Revise: asks a few clarifying questions, produces a structured outline, then generates imports, globals, functions, and main in small passes. Every section is critiqued across multiple aspects (spec match, structure, dependencies, readiness, style) and rewritten if needed.
 
-Strict reviewers: every section is critiqued across multiple aspects (spec match, structure, dependencies, readiness, style) and rewritten if needed.
+After script has been created - 
 
 Pre-run QA sweep: repairs sections against the outline before any execution.
 
 Run & auto-fix loop: executes your script in a separate Python process, analyzes tracebacks, picks the smallest fix target, and patches just that part.
 
-Human-in-the-loop: after each run, you can say “ship it”, or give feedback like “rename X”, “add logging”, “call Y first”—and it will apply one minimal change.
+Human-in-the-loop: after each run, users also have the option to provide feedback before the next revision and it will apply one minimal change.
 
 Snapshots: saves versions under ./script_snapshots/ so you can diff the evolution.
 
