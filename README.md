@@ -1,7 +1,7 @@
 #FunctionFormer2
 
 FunctionFormer2 is a self-healing autocoder that turns a high-level goal into a working Python script.
-It plans an outline, generates the code section-by-section, runs pre-flight fixes, executes the program in a sandboxed subprocess, and iteratively repairs issues using your feedback.
+It plans an outline, generates the code section-by-section, runs pre-flight fixes, executes the program in a sandboxed subprocess, and iteratively repairs issues using your feedback or traceback errors.
 
 
 This has 3 versions:
