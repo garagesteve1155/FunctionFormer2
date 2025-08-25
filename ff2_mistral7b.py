@@ -1,10 +1,9 @@
-import os, torch, re, threading, time, subprocess, sys, json, tempfile, tkinter as tk, psutil, gc
+import os, torch, re, threading, time, subprocess, sys, json, tempfile, tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import io
 import tokenize
-import Overload as overload
 import LLM_Reasoning_Engine as rengine
 import ast
 
@@ -28,7 +27,6 @@ quant_cfg = BitsAndBytesConfig(load_in_8bit=True)
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_PATH, use_fast=False)
 tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
 
-USE_OVERLOAD = False
 model = None
 # === Snapshots ===
 SNAPSHOT_ROOT = os.path.join(os.path.dirname(__file__), "script_snapshots")
@@ -48,116 +46,7 @@ def _init_hf_model():
         offload_state_dict=True,
     ).eval()
 
-try:
-    model = _init_hf_model()
-except Exception:
-    USE_OVERLOAD = True
-
-_overload_runner = None
-_overload_preloaded_layers = []
-_overload_max_i = 0
-_overload_cpu_device = torch.device("cpu")
-_overload_gpu_device = torch.device("cuda") if torch.cuda.is_available() else None
-_overload_eos_token_id = None
-
-def init_overload_engine(ram_buffer_gb: float = 4.0, gpu_vram_buffer_gb: float = 0.0):
-    """
-    Initialize the Overload runner and preload as many layers as memory permits.
-    - ram_buffer_gb: leave at least this much system RAM free
-    - gpu_vram_buffer_gb: leave at least this much VRAM free
-    """
-    global _overload_runner, _overload_preloaded_layers, _overload_max_i, _overload_eos_token_id
-
-    # Align Overload paths to BASE_MODEL_PATH
-    overload.MODEL_DIR = BASE_MODEL_PATH
-    overload.MODEL_INDEX = os.path.join(BASE_MODEL_PATH, "model.safetensors.index.json")
-    overload.CONFIG_PATH = os.path.join(BASE_MODEL_PATH, "config.json")
-
-    runner = overload.MistralLayerwiseRunner(overload.MODEL_DIR, adapter_path=None)
-    runner.device = _overload_cpu_device
-    runner.load_needed()
-    eos_token_id = runner.tokenizer.convert_tokens_to_ids("</s>")
-
-    gpu_available = torch.cuda.is_available()
-    gpu_device = _overload_gpu_device
-    gpu_layers, cpu_layers = [], []
-    max_i = 0
-
-    for i in range(overload.TOTAL_LAYERS):
-        try:
-            if gpu_available:
-                torch.cuda.empty_cache()
-                mem_free, _ = torch.cuda.mem_get_info()
-                gpu_mem_free_gb = mem_free / (1024**3)
-                if gpu_mem_free_gb < gpu_vram_buffer_gb:
-                    raise RuntimeError("Low GPU memory")
-                layer = runner.load_layers(i, i + 1, device=gpu_device)[0]
-                gpu_layers.append(layer)
-                max_i += 1
-                continue
-        except Exception:
-            pass
-
-        if psutil.virtual_memory().available / (1024**3) < ram_buffer_gb:
-            break
-        layer = runner.load_layers(i, i + 1, device=_overload_cpu_device)[0]
-        cpu_layers.append(layer)
-        max_i += 1
-
-    _overload_runner = runner
-    _overload_preloaded_layers = gpu_layers + cpu_layers
-    _overload_max_i = max_i
-    _overload_eos_token_id = eos_token_id
-
-def overload_generate(prompt_text: str, max_new_tokens: int = 512) -> str:
-    """
-    Generate text using the Overload runner. Returns only the assistant text after [/INST].
-    """
-    runner = _overload_runner
-    input_ids = runner.prepare_inputs(prompt_text)
-
-    for step in range(max_new_tokens):
-        hidden_state, attn_mask, position_ids = runner.encode(input_ids)
-        with runner.no_grad():
-            if _overload_preloaded_layers:
-                for i, layer in enumerate(_overload_preloaded_layers):
-                    out = layer(
-                        hidden_state.to(layer.device),
-                        attention_mask=attn_mask.to(layer.device),
-                        position_ids=position_ids.to(layer.device),
-                        past_key_value=None,
-                        use_cache=False,
-                    )
-                    hidden_state = out[0].detach().to(_overload_cpu_device)
-                    del out
-                    if layer.device.type == "cuda":
-                        torch.cuda.empty_cache()
-                    gc.collect()
-
-            for i in range(_overload_max_i, overload.TOTAL_LAYERS):
-                dynamic_layer = runner.load_layers(i, i + 1)[0]
-                out = dynamic_layer(
-                    hidden_state,
-                    attention_mask=attn_mask,
-                    position_ids=position_ids,
-                    past_key_value=None,
-                    use_cache=False,
-                )
-                hidden_state = out[0].detach()
-                del out, dynamic_layer
-                gc.collect()
-
-        input_ids, next_token, _ = runner.generate_token(hidden_state, input_ids, step)
-        if next_token.item() == _overload_eos_token_id:
-            break
-
-    final_text = runner.tokenizer.decode(input_ids[0], skip_special_tokens=True)
-    if "[/INST]" in final_text:
-        final_text = final_text.split("[/INST]", 1)[1]
-    return clean(final_text)
-
-if USE_OVERLOAD:
-    init_overload_engine()
+model = _init_hf_model()
 
 
 # === Helpers ===
@@ -1104,7 +993,7 @@ def norm_line(s: str) -> str:
 @torch.inference_mode()
 def llm(prompt: str, **gen_kwargs) -> str:
     """Generate with proper v0.3 chat formatting (single <s>) and
-       trim oldest history until ≤ 29000 tokens. Uses Overload fallback if HF model is unavailable."""
+       trim oldest history until ≤ 29000 tokens."""
     trimmed = CHAT_HISTORY.copy()
 
     def build_wrapped(pairs):
@@ -1127,12 +1016,6 @@ def llm(prompt: str, **gen_kwargs) -> str:
 
     if len(trimmed) < len(CHAT_HISTORY):
         CHAT_HISTORY[:] = trimmed
-
-
-    #CHANGE THIS SECTION IF YOU WANT TO USE A DIFFERENT LLM!!!!!!!!!!!!!!!
-    if USE_OVERLOAD:
-        max_new = gen_kwargs.get("max_new_tokens", 512)
-        return clean(overload_generate(wrapped, max_new_tokens=max_new))
 
     inputs = tokenizer(wrapped, return_tensors="pt").to(model.device)
     defaults = dict(max_new_tokens=512, temperature=0.7, top_p=0.9, do_sample=True)
