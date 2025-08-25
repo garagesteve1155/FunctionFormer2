@@ -16,7 +16,7 @@ def has_function(script_text: str, name: str) -> bool:
     return any(isinstance(n, ast.FunctionDef) and n.name == name for n in tree.body)
 
 # === Configuration ===
-BASE_MODEL_PATH = "C:/Path/To/Your/Model/Folder/mistral_7b_instruct"
+BASE_MODEL_PATH = "C:/Users/garag/OneDrive/Desktop/NetAI/mistral_7b_instruct"
 
 # === CUDA + model init (with Overload fallback) ===
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -2296,6 +2296,24 @@ class ChatGUI:
         except Exception:
             pass
 
+    def refresh_script_editor(self):
+        """Refresh the middle Script editor to show current SCRIPT_LINES."""
+        try:
+            full_script_text = join_script(SCRIPT_LINES)
+
+            def _set_script_text(s=full_script_text):
+                try:
+                    self.script_editor.delete("1.0", "end")
+                    self.script_editor.insert("1.0", s)
+                    self.script_editor.edit_modified(False)
+                except Exception:
+                    pass
+
+            self.root.after(0, _set_script_text)
+        except Exception:
+            pass
+
+
     # ---------- reasoning UI helpers ----------
     def append_reason(self, text: str):
         # Route reasoning updates to the Status display
@@ -3050,7 +3068,7 @@ class ChatGUI:
             f"{ctx_json}\n"
         )
 
-        raw = llm(prompt, max_new_tokens=64, temperature=0.0)
+        raw = llm(prompt, max_new_tokens=64, temperature=0.1)
         blob = _extract_json_blob(raw) or raw
         data = _safe_json_loads(blob, {}) or {}
         return bool(data.get("end_testing") is True)
@@ -3241,12 +3259,16 @@ class ChatGUI:
         Update: this version uses an AST-based existence check for functions to avoid
         false "missing" detections that caused duplicate re-creation. It also de-dups
         function entries in SECTIONS_PLAN for the sweep.
+
+        NEW: as part of the pre-run checks, remove any duplicate top-level function
+        definitions that are exactly the same (same name AND identical body).
         """
         import ast
         import re
 
         global SCRIPT_LINES, FULL_OUTLINE, GOAL_SPEC, SECTIONS_PLAN
         self.root.after(0, lambda: self.append_display("Starting pre-run checks (QA sweep)...", "response"))
+
         # ---------- helpers ----------
         def build_script_with(section_kind: str, section_spec: dict | list | str, block: str, base_script: str) -> str:
             """Return a new script text with `block` placed/replaced for the given section."""
@@ -3395,6 +3417,9 @@ class ChatGUI:
                     # Python 3.8+ provides end_lineno; if absent, try regex fallback
                     if hasattr(node, "lineno") and hasattr(node, "end_lineno") and node.end_lineno:
                         start = max(1, node.lineno) - 1
+                        # include decorators if present
+                        if getattr(node, "decorator_list", None):
+                            start = min(start, min(max(1, d.lineno) - 1 for d in node.decorator_list))
                         end = max(node.end_lineno, node.lineno)  # end is inclusive
                         return "".join(lines[start:end])
                     break
@@ -3405,6 +3430,73 @@ class ChatGUI:
             # Use the class's regex extractor if header exists
             block = self.extract_function_block(script_text, name)
             return block or ""
+
+        # ---------- NEW: remove duplicate functions that are exactly identical ----------
+        def _dedupe_identical_functions(script_text: str) -> tuple[str, int]:
+            """
+            Remove duplicate top-level function definitions that are textually identical
+            (after whitespace normalization), keeping the first occurrence.
+            Duplicates must have the SAME function name and identical normalized source.
+            Returns (new_script_text, removed_count).
+            """
+            try:
+                tree = ast.parse(script_text)
+            except SyntaxError:
+                return script_text, 0
+
+            lines = script_text.splitlines(True)
+            blocks = []  # (name, start_idx, end_idx, src)
+
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef):
+                    if hasattr(node, "lineno"):
+                        start = max(1, node.lineno) - 1
+                        if getattr(node, "decorator_list", None):
+                            start = min(start, min(max(1, d.lineno) - 1 for d in node.decorator_list))
+                        if hasattr(node, "end_lineno") and node.end_lineno:
+                            end = max(node.end_lineno, node.lineno)
+                        else:
+                            # fallback: regex slice if end_lineno missing
+                            blk = self.extract_function_block(script_text, node.name)
+                            if not blk:
+                                continue
+                            # locate blk span
+                            joined = "".join(lines)
+                            idx = joined.find(blk)
+                            if idx < 0:
+                                continue
+                            upto = joined[:idx]
+                            start = upto.count("\n")
+                            end = start + blk.count("\n") + (0 if blk.endswith("\n") else 1)
+                        src = "".join(lines[start:end])
+                        blocks.append((node.name, start, end, src))
+
+            seen: dict[tuple[str, str], tuple[int, int]] = {}
+            to_remove: list[tuple[int, int]] = []
+            for name, start, end, src in blocks:
+                key = (name, _normalize_ws(src))
+                if key in seen:
+                    to_remove.append((start, end))
+                else:
+                    seen[key] = (start, end)
+
+            if not to_remove:
+                return script_text, 0
+
+            # delete from bottom to top to preserve indices
+            to_remove.sort(key=lambda p: p[0], reverse=True)
+            for start, end in to_remove:
+                del lines[start:end]
+            return "".join(lines), len(to_remove)
+
+        # Apply deduplication before the sweep
+        _before = join_script(SCRIPT_LINES)
+        _after, _removed = _dedupe_identical_functions(_before)
+        if _removed:
+            SCRIPT_LINES = _after.splitlines()
+            self.refresh_script_editor()
+            self.root.after(0, lambda rc=_removed: self.append_display(f"Removed {rc} duplicate function definition(s).", "response"))
+
 
         # ---------- ensure we have a plan & de-dup functions locally ----------
         if not SECTIONS_PLAN:
@@ -3448,7 +3540,6 @@ class ChatGUI:
                         # As a last resort, treat presence as "existing" even if we failed to slice the block,
                         # to avoid creating a duplicate. In that case, just skip creation.
                         if not existing:
-                            # We won't "create missing"; we will just skip this pass for safety.
                             self.root.after(0, lambda n=fname: self.append_display(
                                 f"Detected function `{n}` via AST but could not slice its block; skipping creation to avoid duplicates.", "response"))
                             continue
@@ -3517,10 +3608,12 @@ class ChatGUI:
                             continue
 
                     SCRIPT_LINES = new_script_text.splitlines()
-                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.upper())
+                    self.refresh_script_editor()
+                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.UPPER())
                     self.root.after(0, lambda l=label: self.append_display(f"Created missing section: {l}", "response"))
                     made_change = True
                     continue  # move to next section
+
 
                 # --- Exists -> NORMAL REVISION (focused critique on this section only) ---
                 revised = review_and_optionally_rewrite(section_kind, section_spec, existing, script_text)
@@ -3544,9 +3637,11 @@ class ChatGUI:
                             continue
 
                     SCRIPT_LINES = test_script.splitlines()
-                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.upper())
+                    self.refresh_script_editor()
+                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.UPPER())
                     self.root.after(0, lambda l=label: self.append_display(f"Revised section: {l}", "response"))
                     made_change = True
+
 
             if not made_change:
                 self.root.after(0, lambda: self.append_display("Pre-run section sweeps: OK", "response"))
@@ -3560,6 +3655,7 @@ class ChatGUI:
         else:
             # User chose not to proceed; just stop here gracefully.
             return
+
 
 
 
