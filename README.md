@@ -116,16 +116,24 @@ Shortcuts: Ctrl+Enter submits text in popups.
 🧩 Troubleshooting
 
 Model won’t fit / bitsandbytes error
+
 The app should print “Using Overload fallback”. Keep Overload.py next to the launcher and ensure BASE_MODEL_PATH has the model shards & tokenizer.
 
+
 No GUI / Tkinter error
+
 Install tk: sudo apt install python3-tk (Linux). On macOS/Windows, use the official Python.org installer.
+
 
 “NameError: X is not defined” during run
 The autocoder will attempt to synthesize a missing function based on traceback. If it can’t, add a brief description as feedback (“Create X to do …”) and run again.
 
+
 Feedback is ignored
+
 It applies one minimal change per run. Keep feedback short and specific (e.g., “rename foo to bar in main”, “call init_ui() before load_config()”).
+
+
 
 🔒 Safety & execution
 
@@ -136,5 +144,5 @@ This tool executes generated Python in a subprocess you control. Only run it on 
 
 ⭐ Support
 
-If you find this useful, star the repo and open issues/PRs with concrete repros or improvements.
+If you find this useful, star the repo and please consider becoming a member of the Patreon.
 You can also browse my other projects here: github.com/garagesteve1155.
