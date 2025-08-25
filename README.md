@@ -36,45 +36,39 @@ Human-in-the-loop: after each run, users also have the option to provide feedbac
 Snapshots: saves versions under ./script_snapshots/ so you can diff the evolution.
 
 
-
-🧰 Requirements
-
-Python: 3.10–3.12 recommended
-
-OS: Windows, Linux, or macOS (Windows works; see bitsandbytes note below)
-
-Core deps (install these):
-
-pip install --upgrade torch transformers bitsandbytes psutil
-
-
-tkinter ships with most Python installers (on Linux: sudo apt install python3-tk if needed).
-
-Model (for the Mistral build):
-
-Mistral 7B Instruct v0.3 weights, accessible locally on disk.
-
-bitsandbytes on Windows: 8-bit quantization support can be finicky. If the HF load fails, FunctionFormer2 automatically falls back to Overload.py (its layer-wise runner). You can still use GPU memory when available; otherwise it will stream layers via CPU.
-
 ⚙️ Setup
 
-Clone this repo.
+Download your preferred launcher file (The ff2_***.py files).
 
-Put Overload.py and LLM_Reasoning_Engine.py in the same folder as the launcher you plan to run.
-
-
-
-(Mistral build) Download Mistral 7B Instruct v0.3 to a local folder, e.g.:
-
-D:/models/mistral-7b-instruct-v0.3
+Put LLM_Reasoning_Engine.py in the same folder as the launcher you plan to run (Can be found in the LLM_Reasoning_Engine repo on this same Github).
 
 
-Open ff2_mistral7b.py and set:
 
-BASE_MODEL_PATH = "D:/models/mistral-7b-instruct-v0.3"
+(Mistral build) Download ALL of the files for Mistral 7B Instruct v0.3 to a local folder, e.g.:
+
+C:/models/mistral-7b-instruct-v0.3
 
 
-That path should contain config.json, tokenizer files, and the safetensors.
+In a code editor, open ff2_mistral7b.py and set:
+
+BASE_MODEL_PATH = "C:/models/mistral-7b-instruct-v0.3" (Or wherever your model folder is saved)
+
+
+That path should contain all of the downloaded files.
+
+
+
+(Qwen build) Download ALL of the files for Qwen2.5 14B Instruct to a local folder, e.g.:
+
+C:/models/qwen2-5_14b_instruct
+
+
+In a code editor, open ff2_qwen14b.py and set:
+
+BASE_MODEL_PATH = "C:/models/qwen2-5_14b_instruct" (Or wherever your model folder is saved)
+
+
+That path should contain all of the downloaded files.
 
 
 
@@ -105,9 +99,9 @@ Review & confirm the outline (a popup will show it).
 
 Watch it generate imports → globals → functions → main.
 
-Pre-run QA sweep runs; then it asks permission to execute your script.
+Automated pre-run QA sweep runs; then it asks permission to execute your script.
 
-After each run, give feedback or say “ship it”. It will apply one minimal edit per round.
+After each run, it will automatically fix any traceback errors. Users also have the option to give feedback or tell it to end testing.
 
 Shortcuts: Ctrl+Enter submits text in popups.
 
@@ -115,9 +109,9 @@ Shortcuts: Ctrl+Enter submits text in popups.
 
 🧩 Troubleshooting
 
-Model won’t fit / bitsandbytes error
+Model won’t fit on my computer
 
-The app should print “Using Overload fallback”. Keep Overload.py next to the launcher and ensure BASE_MODEL_PATH has the model shards & tokenizer.
+Use the Mistral version (Requires only 10gb of ram) or use the ChatGPT version.
 
 
 No GUI / Tkinter error
@@ -125,13 +119,9 @@ No GUI / Tkinter error
 Install tk: sudo apt install python3-tk (Linux). On macOS/Windows, use the official Python.org installer.
 
 
-“NameError: X is not defined” during run
-The autocoder will attempt to synthesize a missing function based on traceback. If it can’t, add a brief description as feedback (“Create X to do …”) and run again.
-
-
 Feedback is ignored
 
-It applies one minimal change per run. Keep feedback short and specific (e.g., “rename foo to bar in main”, “call init_ui() before load_config()”).
+It applies one minimal change per run. Keep feedback short and specific (e.g., “rename foo to bar in main”, “call init_ui() before load_config()”). If there was a traceback error, best option *usually* is to leave the feedback blank and let it figure out how to fix the error on its own unless it gets into an endless loop.
 
 
 
