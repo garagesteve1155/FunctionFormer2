@@ -729,7 +729,7 @@ def get_full_outline(goal: str, progress_cb=None) -> str:
         f"User's goal:\n{goal}\n"
     )
     print("\n\n\n\nOUTLINE PROMPT:\n\n" + str(outline_prompt))
-    outline_text = llm(outline_prompt, max_new_tokens=2048, temperature=0.25)
+    outline_text = llm(outline_prompt, max_new_tokens=20480, temperature=0.25)
     print("\n\n\n\nOUTLINE RESPONSE:\n\n" + str(outline_text))
     outline_text = outline_text.strip()
     if callable(progress_cb):
@@ -874,7 +874,7 @@ def critique_outline_section(goal: str, full_outline_text: str, section_name: st
             f"{section_body}\n"
         )
         print("\n\n\n\nCRITIQUE (OUTLINE / ASPECT: " + name + ") PROMPT:\n\n" + str(prompt))
-        resp = llm(prompt, max_new_tokens=160, temperature=0.2)
+        resp = llm(prompt, max_new_tokens=20480, temperature=0.2)
         print("\n\n\n\nCRITIQUE (OUTLINE / ASPECT: " + name + ") RESPONSE:\n\n" + str(resp))
         return resp
 
@@ -943,7 +943,7 @@ def rewrite_outline_section(goal: str, full_outline_text: str, section_name: str
         f"{old_body}\n"
     )
     print("\n\n\n\nREWRITE (OUTLINE SECTION: " + section_name + ") PROMPT:\n\n" + str(prompt))
-    raw = llm(prompt, max_new_tokens=1200, temperature=0.25)
+    raw = llm(prompt, max_new_tokens=20480, temperature=0.25)
     print("\n\n\n\nREWRITE (OUTLINE SECTION: " + section_name + ") RESPONSE:\n\n" + str(raw))
     return extract_code_block(raw).strip()
 
@@ -988,11 +988,16 @@ def refine_outline(goal: str, outline_text: str, progress_cb=None) -> str:
 
 def llm(prompt: str, **gen_kwargs) -> str:
     """
-    Chat with OpenAI Chat Completions via raw HTTP (requests).
-    - Formats messages for ChatGPT (no Mistral-style [INST] wrappers).
-    - Uses CHATGPT_MODEL and OPENAI_API_KEY collected via GUI popups.
+    Chat with OpenAI over raw HTTP via `requests`.
+
+    FIX:
+    - If the selected model is in the GPT-5 family (model name starts with "gpt-5"),
+      call the newer Responses API (`/v1/responses`) and send a single string `input`.
+    - Otherwise, use Chat Completions (`/v1/chat/completions`) as before.
+
+    This prevents 400 errors when you pick a GPT-5 model with the Chat Completions endpoint.
     """
-    # Build history as ChatGPT messages
+    # ---------- build chat-style messages (unchanged) ----------
     trimmed_pairs = CHAT_HISTORY.copy()
 
     def build_messages(pairs):
@@ -1000,7 +1005,6 @@ def llm(prompt: str, **gen_kwargs) -> str:
         for (u, a) in pairs:
             msgs.append({"role": "user", "content": u})
             msgs.append({"role": "assistant", "content": a})
-        # Always include the outline with the CURRENT user prompt
         if FULL_OUTLINE:
             content = f"(REFERENCE OUTLINE for entire script, always consider this when answering):\n{FULL_OUTLINE}\n\n{prompt}"
         else:
@@ -1008,7 +1012,6 @@ def llm(prompt: str, **gen_kwargs) -> str:
         msgs.append({"role": "user", "content": content})
         return msgs
 
-    # Simple char-based trimming (avoid tokenizers)
     def total_chars(msgs):
         return sum(len(str(m.get("content", ""))) for m in msgs)
 
@@ -1019,6 +1022,7 @@ def llm(prompt: str, **gen_kwargs) -> str:
     if len(trimmed_pairs) < len(CHAT_HISTORY):
         CHAT_HISTORY[:] = trimmed_pairs
 
+    # ---------- generation params ----------
     temperature = float(gen_kwargs.get("temperature", 0.7))
     max_new = int(gen_kwargs.get("max_new_tokens", 512))
 
@@ -1029,30 +1033,131 @@ def llm(prompt: str, **gen_kwargs) -> str:
     if not api_key:
         return "ERROR: No OpenAI API key. Please enter it when prompted."
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model_name,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_new,
-    }
+    # ---------- HTTP setup ----------
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
+    # Helper to robustly pull text out of either API shape
+    def _extract_text(data: dict) -> str:
+        # Chat Completions shape
+        try:
+            ch = data.get("choices")
+            if ch:
+                msg = ch[0].get("message") or {}
+                txt = msg.get("content") or ""
+                if isinstance(txt, str) and txt:
+                    return txt
+        except Exception:
+            pass
+        # Responses API convenience aggregate (if provided)
+        txt = data.get("output_text")
+        if isinstance(txt, str) and txt:
+            return txt
+        # Responses API structured output
+        out_parts = []
+        for item in (data.get("output") or []):
+            for c in (item.get("content") or []):
+                if isinstance(c, dict):
+                    t = c.get("text") or c.get("content") or ""
+                    if isinstance(t, str) and t:
+                        out_parts.append(t)
+        if out_parts:
+            return "".join(out_parts)
+        return ""
+
+    # When using GPT-5, switch to the Responses API
+    if model_name.lower().startswith("gpt-5") or model_name.lower().startswith("gpt-4.1"):
+        use_responses = True
+    else:
+        use_responses = False
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=120,
-        )
-        resp.raise_for_status()
+        if model_name.lower().startswith("gpt-5"):
+            # Convert chat messages to a single plain-text prompt for maximum compatibility
+            def _to_plain_prompt(msgs):
+                parts = []
+                for m in msgs:
+                    role = m.get("role", "user").upper()
+                    content = str(m.get("content", ""))
+                    parts.append(f"{role}: {content}")
+                return "\n\n".join(parts)
+
+            payload = {
+                "model": model_name,
+                "input": _to_plain_prompt(messages),
+                "max_output_tokens": max_new,
+                "reasoning": {"effort": "low"},
+            }
+            url = "https://api.openai.com/v1/responses"
+        elif model_name.lower().startswith("gpt-4.1"):
+            # Convert chat messages to a single plain-text prompt for maximum compatibility
+            def _to_plain_prompt(msgs):
+                parts = []
+                for m in msgs:
+                    role = m.get("role", "user").upper()
+                    content = str(m.get("content", ""))
+                    parts.append(f"{role}: {content}")
+                return "\n\n".join(parts)
+
+            payload = {
+                "model": model_name,
+                "input": _to_plain_prompt(messages),
+                "temperature": temperature,
+                "max_output_tokens": max_new,
+            }
+            url = "https://api.openai.com/v1/responses"
+        else:
+            payload = {
+                "model": model_name,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_new,
+            }
+            url = "https://api.openai.com/v1/chat/completions"
+
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+
+        # If the API returns an error status, surface OpenAI's actual error message.
+        if resp.status_code >= 400:
+            try:
+                j = resp.json()
+            except Exception:
+                j = None
+
+            err_msg = None
+            err_type = None
+            err_code = None
+            err_param = None
+
+            if isinstance(j, dict):
+                err = j.get("error") or {}
+                if isinstance(err, dict):
+                    err_msg = err.get("message") or None
+                    err_type = err.get("type") or None
+                    err_code = err.get("code") or None
+                    err_param = err.get("param") or None
+                if not err_msg:
+                    err_msg = j.get("message") or None  # some servers put message at top level
+
+            details = (err_msg or (resp.text or "").strip())[:2000]
+            meta = ", ".join(x for x in [
+                f"type={err_type}" if err_type else "",
+                f"code={err_code}" if err_code else "",
+                f"param={err_param}" if err_param else "",
+            ] if x)
+            if meta:
+                details = f"{details} ({meta})"
+
+            return f"ERROR calling ChatGPT ({resp.status_code} {resp.reason}) at {url}: {details}"
+
         data = resp.json()
-        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
-        return clean(text)
+        print(data)
+        text = _extract_text(data)
+        return clean(text or "")
+    except requests.exceptions.RequestException as e:
+        return f"ERROR calling ChatGPT (network): {type(e).__name__}: {e}"
     except Exception as e:
-        return f"ERROR calling ChatGPT: {e}"
+        return f"ERROR calling ChatGPT: {type(e).__name__}: {e}"
+
+
 
 
 
@@ -1129,7 +1234,7 @@ def critique_section(goal: str, script_so_far: str, section_kind: str, section_s
             f"Proposed section code:\n{candidate_code}\n"
         )
         print("\n\n\n\nCRITIQUE (ASPECT: " + aspect_name + ") PROMPT:\n\n" + str(prompt))
-        resp = llm(prompt, max_new_tokens=75, temperature=0.25)
+        resp = llm(prompt, max_new_tokens=20480, temperature=0.25)
         print("\n\n\n\nCRITIQUE (ASPECT: " + aspect_name + ") RESPONSE:\n\n" + str(resp))
         return resp
 
@@ -1179,7 +1284,7 @@ def pre_reviser_explain(goal: str, script_so_far: str, section_kind: str, sectio
     )
 
     print("\n\n\n\nPRE-REVISER EXPLANATION PROMPT:\n\n" + str(prompt))
-    resp = llm(prompt, max_new_tokens=200, temperature=0.2)
+    resp = llm(prompt, max_new_tokens=20480, temperature=0.2)
     print("\n\n\n\nPRE-REVISER EXPLANATION RESPONSE:\n\n" + str(resp))
     return resp.strip()
 
@@ -1269,7 +1374,7 @@ def rewrite_section(goal: str, script_so_far: str, section_kind: str, section_sp
 
 
     print("\n\n\n\nREVISE (SECTION) PROMPT:\n\n"+str(revise_prompt))
-    raw = llm(revise_prompt, max_new_tokens=2048, temperature=0.25)
+    raw = llm(revise_prompt, max_new_tokens=20480, temperature=0.25)
     print("\n\n\n\nREVISE (SECTION) RESPONSE:\n\n"+str(raw))
     return extract_code_block(raw)
 
@@ -2559,7 +2664,7 @@ class ChatGUI:
                     + "\n\n"
                     "Respond with ONLY one of the ALLOWED_LABELS. No extra text."
                 )
-                resp = llm(prompt, max_new_tokens=8, temperature=0.1, top_p=0.95, do_sample=False).strip()
+                resp = llm(prompt, max_new_tokens=20480, temperature=0.1, top_p=0.95, do_sample=False).strip()
                 # Normalize and validate
                 # Prefer exact match; otherwise extract the first valid label substring.
                 if resp in labels:
@@ -2644,7 +2749,7 @@ class ChatGUI:
                     )
 
                 print("\n\n\n\nSYNTH (SECTION) PROMPT (attempt " + str(attempt) + "):\n\n" + str(synth_prompt))
-                raw_response = llm(synth_prompt, max_new_tokens=2048, temperature=0.25, top_p=0.9, do_sample=True)
+                raw_response = llm(synth_prompt, max_new_tokens=20480, temperature=0.25, top_p=0.9, do_sample=True)
                 candidate_code = sanitize_candidate(extract_code_block(raw_response), section_kind)
                 last_candidate_code = candidate_code
                 print("\n\n\n\nSYNTH (SECTION) RESPONSE (attempt " + str(attempt) + "):\n\n" + str(raw_response))
@@ -2855,7 +2960,7 @@ class ChatGUI:
             f"Full Script's Outline (reference):\n{FULL_OUTLINE or ''}\n\n"
             f"Current script:\n{script_so_far}\n\n(END OF SCRIPT)\n"
         )
-        raw = llm(prompt, max_new_tokens=2048, temperature=0.25, top_p=0.9, do_sample=True)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.25, top_p=0.9, do_sample=True)
         candidate = sanitize_candidate(extract_code_block(raw), "function")
 
         # Basic check: correct function name
@@ -2917,7 +3022,7 @@ class ChatGUI:
             "OUTPUT ONLY the sentences—no code, no bullets, no headings."
             f"\n\nTRACEBACK:\n{error_text}\n\nCURRENT SCRIPT:\n{script_so_far}\n"
         )
-        desc = clean(extract_code_block(llm(desc_prompt, max_new_tokens=160, temperature=0.2))).strip()
+        desc = clean(extract_code_block(llm(desc_prompt, max_new_tokens=20480, temperature=0.2))).strip()
         if not desc:
             desc = "Auto-added function required by runtime error. Handles the specific event and updates the GUI as needed."
 
@@ -2981,7 +3086,7 @@ class ChatGUI:
                 f"Full script under review:\n{script_text}\n"
             )
             print("\n\n\n\nFULL-SCRIPT CRITIQUE (ASPECT: " + name + ") PROMPT:\n\n" + str(prompt))
-            resp = llm(prompt, max_new_tokens=128, temperature=0.2)
+            resp = llm(prompt, max_new_tokens=20480, temperature=0.2)
             print("\n\n\n\nFULL-SCRIPT CRITIQUE (ASPECT: " + name + ") RESPONSE:\n\n" + str(resp))
             return resp
 
@@ -3075,7 +3180,7 @@ class ChatGUI:
             f"{ctx_json}\n"
         )
 
-        raw = llm(prompt, max_new_tokens=64, temperature=0.0)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.0)
         blob = _extract_json_blob(raw) or raw
         data = _safe_json_loads(blob, {}) or {}
         return bool(data.get("end_testing") is True)
@@ -3100,7 +3205,7 @@ class ChatGUI:
             f"CRITIQUE:\n{critique_text}\n"
         )
         print("\n\n\n\nSELECT FIX TARGET FROM CRITIQUE PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=256, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.2)
         print("\n\n\n\nSELECT FIX TARGET FROM CRITIQUE RESPONSE:\n\n" + str(raw))
 
         txt = extract_code_block(raw) or raw
@@ -3131,7 +3236,7 @@ class ChatGUI:
             f"CRITIQUE NOTES:\n{critique_text}\n"
         )
         print("\n\n\n\nGENERATE IMPORTS FIX PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=512, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.2)
         print("\n\n\n\nGENERATE IMPORTS FIX RESPONSE:\n\n" + str(raw))
 
         return extract_code_block(raw).strip()
@@ -3152,7 +3257,7 @@ class ChatGUI:
             f"CRITIQUE NOTES:\n{critique_text}\n"
         )
         print("\n\n\n\nGENERATE GLOBALS FIX PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=512, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.2)
         print("\n\n\n\nGENERATE GLOBALS FIX RESPONSE:\n\n" + str(raw))
 
         return extract_code_block(raw).strip()
@@ -3377,7 +3482,7 @@ class ChatGUI:
                     f"Full Script's Outline (reference):\n{FULL_OUTLINE}\n\n"
                     f"Current script:\n{script_so_far}\n\n(END OF SCRIPT)\n"
                 )
-            raw = llm(prompt, max_new_tokens=2048, temperature=0.25, top_p=0.9, do_sample=True)
+            raw = llm(prompt, max_new_tokens=20480, temperature=0.25, top_p=0.9, do_sample=True)
             code = sanitize_candidate(extract_code_block(raw), section_kind)
             if section_kind == "main":
                 code = ensure_main_guard(code)
@@ -3614,7 +3719,7 @@ class ChatGUI:
 
                     SCRIPT_LINES = new_script_text.splitlines()
                     self.refresh_script_editor()
-                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.UPPER())
+                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.upper())
                     self.root.after(0, lambda l=label: self.append_display(f"Created missing section: {l}", "response"))
                     made_change = True
                     continue  # move to next section
@@ -3643,7 +3748,7 @@ class ChatGUI:
 
                     SCRIPT_LINES = test_script.splitlines()
                     self.refresh_script_editor()
-                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.UPPER())
+                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.upper())
                     self.root.after(0, lambda l=label: self.append_display(f"Revised section: {l}", "response"))
                     made_change = True
 
@@ -4121,7 +4226,7 @@ class ChatGUI:
             f"TRACEBACK:\n{error_text}\n"
         )
         print("\n\n\n\nSELECT FIX TARGET (TRACEBACK) PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=256, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.2)
         print("\n\n\n\nSELECT FIX TARGET (TRACEBACK) RESPONSE:\n\n" + str(raw))
 
         txt = extract_code_block(raw) or raw
@@ -4157,7 +4262,7 @@ class ChatGUI:
             f"FULL SCRIPT (reference):\n{full_script}\n"
         )
         print("\n\n\n\nFUNCTION FIX PROMPT (" + function_name + "):\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=1024, temperature=0.3)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.3)
         print("\n\n\n\nFUNCTION FIX RESPONSE (" + function_name + "):\n\n" + str(raw))
 
         return extract_code_block(raw).strip()
@@ -4183,7 +4288,7 @@ class ChatGUI:
             f"FULL SCRIPT (reference):\n{full_script}\n"
         )
         print("\n\n\n\nMAIN FIX PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=1024, temperature=0.3)
+        raw = llm(prompt, max_new_tokens=20480, temperature=0.3)
         print("\n\n\n\nMAIN FIX RESPONSE:\n\n" + str(raw))
 
         return ensure_main_guard(extract_code_block(raw).strip())
