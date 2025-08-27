@@ -1083,7 +1083,6 @@ def llm(prompt: str, **gen_kwargs) -> str:
             payload = {
                 "model": model_name,
                 "input": _to_plain_prompt(messages),
-                "max_output_tokens": max_new,
                 "reasoning": {"effort": "low"},
             }
             url = "https://api.openai.com/v1/responses"
@@ -1101,7 +1100,6 @@ def llm(prompt: str, **gen_kwargs) -> str:
                 "model": model_name,
                 "input": _to_plain_prompt(messages),
                 "temperature": temperature,
-                "max_output_tokens": max_new,
             }
             url = "https://api.openai.com/v1/responses"
         else:
@@ -1109,7 +1107,6 @@ def llm(prompt: str, **gen_kwargs) -> str:
                 "model": model_name,
                 "messages": messages,
                 "temperature": temperature,
-                "max_tokens": max_new,
             }
             url = "https://api.openai.com/v1/chat/completions"
 
