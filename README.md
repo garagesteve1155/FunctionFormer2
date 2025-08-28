@@ -4,13 +4,15 @@ FunctionFormer2 is a self-healing autocoder that turns a high-level goal into a 
 It plans an outline, generates the code section-by-section, runs pre-flight fixes, executes the program in a sandboxed subprocess, and iteratively repairs issues using your feedback or traceback errors.
 
 
-This has 3 versions:
+This has 4 versions:
 
 ff2_chatgpt.py — build targeting OpenAI ChatGPT models through the online API - Runs on ANY computer with internet.
 
 ff2_mistral7b.py — local, offline build targeting Mistral 7B Instruct v0.3 - Requires around 10GB of RAM, no Graphics Card required. Runs faster if your computer has a Graphics Card, especially if the Graphics Card can fit everything instead of splitting the model between GPU and RAM. 
 
 ff2_qwen14b.py - local, offline build targeting Qwen2.5 14B Instruct - Requires around 25GB of RAM, no Graphics Card required. Like the Mistral version, the more of the model that you can fit on a graphics card, the faster it will run.
+
+ff2_qwen32b.py - local, offline build targeting Qwen2.5 32B Instruct - Requires around 70GB of RAM, no Graphics Card required. Like the Mistral version, the more of the model that you can fit on a graphics card, the faster it will run.
 
 
 ⚠️ You’ll also need one helper module file placed next to the ff2_*.py file you run:
@@ -43,8 +45,8 @@ Download your preferred launcher file (The ff2_***.py files).
 Put LLM_Reasoning_Engine.py in the same folder as the launcher you plan to run (Can be found in the LLM_Reasoning_Engine repo on this same Github).
 
 
-
-(Mistral build) Download ALL of the files for Mistral 7B Instruct v0.3 to a local folder, e.g.:
+(Mistral Setup)
+Download ALL of the files for Mistral 7B Instruct v0.3 to a local folder, e.g.:
 
 C:/models/mistral-7b-instruct-v0.3
 
@@ -57,15 +59,18 @@ BASE_MODEL_PATH = "C:/models/mistral-7b-instruct-v0.3" (Or wherever your model f
 That path should contain all of the downloaded files.
 
 
-
-(Qwen build) Download ALL of the files for Qwen2.5 14B Instruct to a local folder, e.g.:
+(Qwen Setup)
+Download ALL of the files for Qwen2.5 14B Instruct or Qwen2.5 32B Instruct to a local folder, e.g.:
 
 C:/models/qwen2-5_14b_instruct
+C:/models/qwen2-5_32b_instruct
 
+In a code editor, open ff2_qwen14b.py or ff2_qwen32b.py and set:
 
-In a code editor, open ff2_qwen14b.py and set:
-
-BASE_MODEL_PATH = "C:/models/qwen2-5_14b_instruct" (Or wherever your model folder is saved)
+BASE_MODEL_PATH = "C:/models/qwen2-5_14b_instruct"
+or
+BASE_MODEL_PATH = "C:/models/qwen2-5_32b_instruct"
+(Or wherever your model folder is saved)
 
 
 That path should contain all of the downloaded files.
