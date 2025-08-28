@@ -19,7 +19,7 @@ ff2_qwen32b.py - local, offline build targeting Qwen2.5 32B Instruct - Requires 
 
 LLM_Reasoning_Engine.py (small “planning/critique” helper)
 
-This can be found in the LLM_Reasoning_Engine repo on my Github page. Drop the py file in the same folder as ff2_chatgpt.py / ff2_mistral7b.py / ff2_qwen14b.py.
+This can be found in the LLM_Reasoning_Engine repo on my Github page. Drop the py file in the same folder as ff2_***.py.
 
 
 
