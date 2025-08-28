@@ -15,7 +15,7 @@ def has_function(script_text: str, name: str) -> bool:
     return any(isinstance(n, ast.FunctionDef) and n.name == name for n in tree.body)
 
 # === Configuration ===
-BASE_MODEL_PATH = "C:/Users/garag/OneDrive/Desktop/MME/qwen32b"
+BASE_MODEL_PATH = "C:/Path/To/Your/Model/Folder/qwen32b"
 
 # === CUDA + model init ===
 torch.backends.cuda.matmul.allow_tf32 = True
