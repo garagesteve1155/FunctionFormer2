@@ -15,7 +15,7 @@ def has_function(script_text: str, name: str) -> bool:
     return any(isinstance(n, ast.FunctionDef) and n.name == name for n in tree.body)
 
 # === Configuration ===
-BASE_MODEL_PATH = "C:/Path/To/Your/Model/Folder/qwen2-5_14b_instruct"
+BASE_MODEL_PATH = "C:/Users/garag/OneDrive/Desktop/MME/qwen"
 
 # === CUDA + model init ===
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -710,7 +710,6 @@ def get_full_outline(goal: str, progress_cb=None) -> str:
         "You are an expert Python software architect.\n"
         "Given the user's overall goal, produce a COMPLETE, DETAILED LAYOUT OUTLINE for the Python script.\n"
         "HARD REQUIREMENTS:\n"
-        "- Favor MORE and SMALLER functions over fewer, larger ones.\n"
         "- DO NOT include any Python code.\n"
         "- DO NOT wrap names in backticks.\n"
         "- For function names, DO NOT include parentheses (use create_gui, not create_gui()).\n"
@@ -731,7 +730,7 @@ def get_full_outline(goal: str, progress_cb=None) -> str:
         f"User's goal:\n{goal}\n"
     )
     print("\n\n\n\nOUTLINE PROMPT:\n\n" + str(outline_prompt))
-    outline_text = llm(outline_prompt, max_new_tokens=2048, temperature=0.25)
+    outline_text = llm(outline_prompt, max_new_tokens=4096, temperature=0.25)
     print("\n\n\n\nOUTLINE RESPONSE:\n\n" + str(outline_text))
     outline_text = outline_text.strip()
     if callable(progress_cb):
@@ -844,7 +843,7 @@ def critique_outline_section(goal: str, full_outline_text: str, section_name: st
         (
             "Coverage vs Goal",
             "- Section content is sufficient given the user's goal.\n"
-            "- FUNCTIONS section includes all helpers needed to implement the goal at small granularity (favor more/smaller functions)."
+            "- FUNCTIONS section includes all helpers needed to implement the goal."
         ),
         (
             "Consistency Across Sections",
@@ -876,7 +875,7 @@ def critique_outline_section(goal: str, full_outline_text: str, section_name: st
             f"{section_body}\n"
         )
         print("\n\n\n\nCRITIQUE (OUTLINE / ASPECT: " + name + ") PROMPT:\n\n" + str(prompt))
-        resp = llm(prompt, max_new_tokens=160, temperature=0.2)
+        resp = llm(prompt, max_new_tokens=4096, temperature=0.2)
         print("\n\n\n\nCRITIQUE (OUTLINE / ASPECT: " + name + ") RESPONSE:\n\n" + str(resp))
         return resp
 
@@ -906,7 +905,6 @@ def rewrite_outline_section(goal: str, full_outline_text: str, section_name: str
             "Output ONLY the numbered FUNCTIONS list (no 'FUNCTIONS:' header).\n"
             "- Use snake_case names WITHOUT parentheses.\n"
             "- Each entry format: '1) name - one or two precise sentences ...'\n"
-            "- Favor more and smaller functions when needed.\n"
             "- Add any missing helpers required by the goal.\n"
             "- Do not include code; outline text only.\n"
             "- Change only what is necessary to satisfy the critique."
@@ -945,7 +943,7 @@ def rewrite_outline_section(goal: str, full_outline_text: str, section_name: str
         f"{old_body}\n"
     )
     print("\n\n\n\nREWRITE (OUTLINE SECTION: " + section_name + ") PROMPT:\n\n" + str(prompt))
-    raw = llm(prompt, max_new_tokens=1200, temperature=0.25)
+    raw = llm(prompt, max_new_tokens=4096, temperature=0.25)
     print("\n\n\n\nREWRITE (OUTLINE SECTION: " + section_name + ") RESPONSE:\n\n" + str(raw))
     return extract_code_block(raw).strip()
 
@@ -1039,7 +1037,7 @@ def llm(prompt: str, **gen_kwargs) -> str:
     inputs = tokenizer(rendered, return_tensors="pt").to(model.device)
 
     defaults = dict(
-        max_new_tokens=512,
+        max_new_tokens=4096,
         temperature=0.7,
         top_p=0.9,
         do_sample=True,
@@ -1166,7 +1164,7 @@ def critique_section(goal: str, script_so_far: str, section_kind: str, section_s
             f"Proposed section code:\n{candidate_code}\n"
         )
         print("\n\n\n\nCRITIQUE (ASPECT: " + aspect_name + ") PROMPT:\n\n" + str(prompt))
-        resp = llm(prompt, max_new_tokens=75, temperature=0.25)
+        resp = llm(prompt, max_new_tokens=4096, temperature=0.25)
         print("\n\n\n\nCRITIQUE (ASPECT: " + aspect_name + ") RESPONSE:\n\n" + str(resp))
         return resp
 
@@ -1216,7 +1214,7 @@ def pre_reviser_explain(goal: str, script_so_far: str, section_kind: str, sectio
     )
 
     print("\n\n\n\nPRE-REVISER EXPLANATION PROMPT:\n\n" + str(prompt))
-    resp = llm(prompt, max_new_tokens=200, temperature=0.2)
+    resp = llm(prompt, max_new_tokens=4096, temperature=0.2)
     print("\n\n\n\nPRE-REVISER EXPLANATION RESPONSE:\n\n" + str(resp))
     return resp.strip()
 
@@ -1264,10 +1262,9 @@ def rewrite_section(goal: str, script_so_far: str, section_kind: str, section_sp
         fname = section_spec.get("name", "")
         fdesc = section_spec.get("desc", "")
         revise_prompt = (
-            "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+            "You are generating a SINGLE FUNCTION for a Python script.\n"
             "HARD REQUIREMENTS:\n"
             f"- Define exactly one function: `{fname}`.\n"
-            "- Keep it small and focused (favor decomposition).\n"
             "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
             "- Use only built-in types in annotations to avoid extra imports.\n"
             "- Do NOT include other functions, classes, imports, or main().\n"
@@ -1306,7 +1303,7 @@ def rewrite_section(goal: str, script_so_far: str, section_kind: str, section_sp
 
 
     print("\n\n\n\nREVISE (SECTION) PROMPT:\n\n"+str(revise_prompt))
-    raw = llm(revise_prompt, max_new_tokens=2048, temperature=0.25)
+    raw = llm(revise_prompt, max_new_tokens=4096, temperature=0.25)
     print("\n\n\n\nREVISE (SECTION) RESPONSE:\n\n"+str(raw))
     return extract_code_block(raw)
 
@@ -2567,7 +2564,7 @@ class ChatGUI:
                     + "\n\n"
                     "Respond with ONLY one of the ALLOWED_LABELS. No extra text."
                 )
-                resp = llm(prompt, max_new_tokens=8, temperature=0.1, top_p=0.95, do_sample=False).strip()
+                resp = llm(prompt, max_new_tokens=4096, temperature=0.1, top_p=0.95, do_sample=False).strip()
                 # Normalize and validate
                 # Prefer exact match; otherwise extract the first valid label substring.
                 if resp in labels:
@@ -2615,10 +2612,9 @@ class ChatGUI:
                     fname = section_spec.get("name", "")
                     fdesc = section_spec.get("desc", "")
                     synth_prompt = (
-                        "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+                        "You are generating a SINGLE FUNCTION for a Python script.\n"
                         "HARD REQUIREMENTS:\n"
                         f"- Define exactly one function: `{fname}`.\n"
-                        "- Keep it small and focused (favor decomposition).\n"
                         "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
                         "- Use only built-in types in annotations to avoid extra imports.\n"
                         "- Do NOT include other functions, classes, imports, or main().\n"
@@ -2652,7 +2648,7 @@ class ChatGUI:
                     )
 
                 print("\n\n\n\nSYNTH (SECTION) PROMPT (attempt " + str(attempt) + "):\n\n" + str(synth_prompt))
-                raw_response = llm(synth_prompt, max_new_tokens=2048, temperature=0.25, top_p=0.9, do_sample=True)
+                raw_response = llm(synth_prompt, max_new_tokens=4096, temperature=0.25, top_p=0.9, do_sample=True)
                 candidate_code = sanitize_candidate(extract_code_block(raw_response), section_kind)
                 last_candidate_code = candidate_code
                 print("\n\n\n\nSYNTH (SECTION) RESPONSE (attempt " + str(attempt) + "):\n\n" + str(raw_response))
@@ -2850,10 +2846,9 @@ class ChatGUI:
 
         # Synthesize (same spec as your normal single-function generation)
         prompt = (
-            "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+            "You are generating a SINGLE FUNCTION for a Python script.\n"
             "HARD REQUIREMENTS:\n"
             f"- Define exactly one function: `{func_name}`.\n"
-            "- Keep it small and focused (favor decomposition).\n"
             "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
             "- Use only built-in types in annotations to avoid extra imports.\n"
             "- Do NOT include other functions, classes, imports, or main().\n"
@@ -2863,7 +2858,7 @@ class ChatGUI:
             f"Full Script's Outline (reference):\n{FULL_OUTLINE or ''}\n\n"
             f"Current script:\n{script_so_far}\n\n(END OF SCRIPT)\n"
         )
-        raw = llm(prompt, max_new_tokens=2048, temperature=0.25, top_p=0.9, do_sample=True)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.25, top_p=0.9, do_sample=True)
         candidate = sanitize_candidate(extract_code_block(raw), "function")
 
         # Basic check: correct function name
@@ -2925,7 +2920,7 @@ class ChatGUI:
             "OUTPUT ONLY the sentences—no code, no bullets, no headings."
             f"\n\nTRACEBACK:\n{error_text}\n\nCURRENT SCRIPT:\n{script_so_far}\n"
         )
-        desc = clean(extract_code_block(llm(desc_prompt, max_new_tokens=160, temperature=0.2))).strip()
+        desc = clean(extract_code_block(llm(desc_prompt, max_new_tokens=4096, temperature=0.2))).strip()
         if not desc:
             desc = "Auto-added function required by runtime error. Handles the specific event and updates the GUI as needed."
 
@@ -2989,7 +2984,7 @@ class ChatGUI:
                 f"Full script under review:\n{script_text}\n"
             )
             print("\n\n\n\nFULL-SCRIPT CRITIQUE (ASPECT: " + name + ") PROMPT:\n\n" + str(prompt))
-            resp = llm(prompt, max_new_tokens=128, temperature=0.2)
+            resp = llm(prompt, max_new_tokens=4096, temperature=0.2)
             print("\n\n\n\nFULL-SCRIPT CRITIQUE (ASPECT: " + name + ") RESPONSE:\n\n" + str(resp))
             return resp
 
@@ -3081,7 +3076,7 @@ class ChatGUI:
             f"{ctx_json}\n"
         )
 
-        raw = llm(prompt, max_new_tokens=64, temperature=0.1)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.1)
         blob = _extract_json_blob(raw) or raw
         data = _safe_json_loads(blob, {}) or {}
         return bool(data.get("end_testing") is True)
@@ -3107,7 +3102,7 @@ class ChatGUI:
             f"CRITIQUE:\n{critique_text}\n"
         )
         print("\n\n\n\nSELECT FIX TARGET FROM CRITIQUE PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=256, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.2)
         print("\n\n\n\nSELECT FIX TARGET FROM CRITIQUE RESPONSE:\n\n" + str(raw))
 
         txt = extract_code_block(raw) or raw
@@ -3138,7 +3133,7 @@ class ChatGUI:
             f"CRITIQUE NOTES:\n{critique_text}\n"
         )
         print("\n\n\n\nGENERATE IMPORTS FIX PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=512, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.2)
         print("\n\n\n\nGENERATE IMPORTS FIX RESPONSE:\n\n" + str(raw))
 
         return extract_code_block(raw).strip()
@@ -3159,7 +3154,7 @@ class ChatGUI:
             f"CRITIQUE NOTES:\n{critique_text}\n"
         )
         print("\n\n\n\nGENERATE GLOBALS FIX PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=512, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.2)
         print("\n\n\n\nGENERATE GLOBALS FIX RESPONSE:\n\n" + str(raw))
 
         return extract_code_block(raw).strip()
@@ -3349,10 +3344,9 @@ class ChatGUI:
                 fname = section_spec.get("name", "")
                 fdesc = section_spec.get("desc", "")
                 prompt = (
-                    "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+                    "You are generating a SINGLE FUNCTION for a Python script.\n"
                     "HARD REQUIREMENTS:\n"
                     f"- Define exactly one function: `{fname}`.\n"
-                    "- Keep it small and focused (favor decomposition).\n"
                     "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
                     "- Use only built-in types in annotations to avoid extra imports.\n"
                     "- Do NOT include other functions, classes, imports, or main().\n"
@@ -3384,7 +3378,7 @@ class ChatGUI:
                     f"Full Script's Outline (reference):\n{FULL_OUTLINE}\n\n"
                     f"Current script:\n{script_so_far}\n\n(END OF SCRIPT)\n"
                 )
-            raw = llm(prompt, max_new_tokens=2048, temperature=0.25, top_p=0.9, do_sample=True)
+            raw = llm(prompt, max_new_tokens=4096, temperature=0.25, top_p=0.9, do_sample=True)
             code = sanitize_candidate(extract_code_block(raw), section_kind)
             if section_kind == "main":
                 code = ensure_main_guard(code)
@@ -3622,7 +3616,7 @@ class ChatGUI:
 
                     SCRIPT_LINES = new_script_text.splitlines()
                     self.refresh_script_editor()
-                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.UPPER())
+                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.upper())
                     self.root.after(0, lambda l=label: self.append_display(f"Created missing section: {l}", "response"))
                     made_change = True
                     continue  # move to next section
@@ -3651,7 +3645,7 @@ class ChatGUI:
 
                     SCRIPT_LINES = test_script.splitlines()
                     self.refresh_script_editor()
-                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.UPPER())
+                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict) else section_kind.upper())
                     self.root.after(0, lambda l=label: self.append_display(f"Revised section: {l}", "response"))
                     made_change = True
 
@@ -4129,7 +4123,7 @@ class ChatGUI:
             f"TRACEBACK:\n{error_text}\n"
         )
         print("\n\n\n\nSELECT FIX TARGET (TRACEBACK) PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=256, temperature=0.2)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.2)
         print("\n\n\n\nSELECT FIX TARGET (TRACEBACK) RESPONSE:\n\n" + str(raw))
 
         txt = extract_code_block(raw) or raw
@@ -4157,7 +4151,7 @@ class ChatGUI:
             "You are fixing a SINGLE Python function.\n"
             "HARD REQUIREMENTS:\n"
             f"- Output ONLY the corrected definition of the function `{function_name}` as plain Python code (no fences, no extra text).\n"
-            "- Keep the function small and focused; include a concise docstring.\n"
+            "- Keep the function focused; include a concise docstring.\n"
             "- Preserve the function signature unless the traceback proves it must change.\n\n"
             f"FUNCTION TO FIX:\n{bad_function_src}\n\n"
             f"ERROR TRACEBACK:\n{error_text}\n\n"
@@ -4165,7 +4159,7 @@ class ChatGUI:
             f"FULL SCRIPT (reference):\n{full_script}\n"
         )
         print("\n\n\n\nFUNCTION FIX PROMPT (" + function_name + "):\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=1024, temperature=0.3)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.3)
         print("\n\n\n\nFUNCTION FIX RESPONSE (" + function_name + "):\n\n" + str(raw))
 
         return extract_code_block(raw).strip()
@@ -4191,7 +4185,7 @@ class ChatGUI:
             f"FULL SCRIPT (reference):\n{full_script}\n"
         )
         print("\n\n\n\nMAIN FIX PROMPT:\n\n" + str(prompt))
-        raw = llm(prompt, max_new_tokens=1024, temperature=0.3)
+        raw = llm(prompt, max_new_tokens=4096, temperature=0.3)
         print("\n\n\n\nMAIN FIX RESPONSE:\n\n" + str(raw))
 
         return ensure_main_guard(extract_code_block(raw).strip())
