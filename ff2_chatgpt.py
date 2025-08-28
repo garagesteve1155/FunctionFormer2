@@ -708,7 +708,6 @@ def get_full_outline(goal: str, progress_cb=None) -> str:
         "You are an expert Python software architect.\n"
         "Given the user's overall goal, produce a COMPLETE, DETAILED LAYOUT OUTLINE for the Python script.\n"
         "HARD REQUIREMENTS:\n"
-        "- Favor MORE and SMALLER functions over fewer, larger ones.\n"
         "- DO NOT include any Python code.\n"
         "- DO NOT wrap names in backticks.\n"
         "- For function names, DO NOT include parentheses (use create_gui, not create_gui()).\n"
@@ -842,7 +841,7 @@ def critique_outline_section(goal: str, full_outline_text: str, section_name: st
         (
             "Coverage vs Goal",
             "- Section content is sufficient given the user's goal.\n"
-            "- FUNCTIONS section includes all helpers needed to implement the goal at small granularity (favor more/smaller functions)."
+            "- FUNCTIONS section includes all helpers needed to implement the goal."
         ),
         (
             "Consistency Across Sections",
@@ -904,7 +903,6 @@ def rewrite_outline_section(goal: str, full_outline_text: str, section_name: str
             "Output ONLY the numbered FUNCTIONS list (no 'FUNCTIONS:' header).\n"
             "- Use snake_case names WITHOUT parentheses.\n"
             "- Each entry format: '1) name - one or two precise sentences ...'\n"
-            "- Favor more and smaller functions when needed.\n"
             "- Add any missing helpers required by the goal.\n"
             "- Do not include code; outline text only.\n"
             "- Change only what is necessary to satisfy the critique."
@@ -1329,10 +1327,9 @@ def rewrite_section(goal: str, script_so_far: str, section_kind: str, section_sp
         fname = section_spec.get("name", "")
         fdesc = section_spec.get("desc", "")
         revise_prompt = (
-            "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+            "You are generating a SINGLE FUNCTION for a Python script.\n"
             "HARD REQUIREMENTS:\n"
             f"- Define exactly one function: `{fname}`.\n"
-            "- Keep it small and focused (favor decomposition).\n"
             "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
             "- Use only built-in types in annotations to avoid extra imports.\n"
             "- Do NOT include other functions, classes, imports, or main().\n"
@@ -2709,10 +2706,9 @@ class ChatGUI:
                     fname = section_spec.get("name", "")
                     fdesc = section_spec.get("desc", "")
                     synth_prompt = (
-                        "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+                        "You are generating a SINGLE FUNCTION for a Python script.\n"
                         "HARD REQUIREMENTS:\n"
                         f"- Define exactly one function: `{fname}`.\n"
-                        "- Keep it small and focused (favor decomposition).\n"
                         "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
                         "- Use only built-in types in annotations to avoid extra imports.\n"
                         "- Do NOT include other functions, classes, imports, or main().\n"
@@ -2944,10 +2940,9 @@ class ChatGUI:
 
         # Synthesize (same spec as your normal single-function generation)
         prompt = (
-            "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+            "You are generating a SINGLE FUNCTION for a Python script.\n"
             "HARD REQUIREMENTS:\n"
             f"- Define exactly one function: `{func_name}`.\n"
-            "- Keep it small and focused (favor decomposition).\n"
             "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
             "- Use only built-in types in annotations to avoid extra imports.\n"
             "- Do NOT include other functions, classes, imports, or main().\n"
@@ -3444,10 +3439,9 @@ class ChatGUI:
                 fname = section_spec.get("name", "")
                 fdesc = section_spec.get("desc", "")
                 prompt = (
-                    "You are generating a SINGLE SMALL FUNCTION for a Python script.\n"
+                    "You are generating a SINGLE FUNCTION for a Python script.\n"
                     "HARD REQUIREMENTS:\n"
                     f"- Define exactly one function: `{fname}`.\n"
-                    "- Keep it small and focused (favor decomposition).\n"
                     "- Include a concise docstring that explains inputs/outputs/side-effects.\n"
                     "- Use only built-in types in annotations to avoid extra imports.\n"
                     "- Do NOT include other functions, classes, imports, or main().\n"
@@ -4251,7 +4245,7 @@ class ChatGUI:
             "You are fixing a SINGLE Python function.\n"
             "HARD REQUIREMENTS:\n"
             f"- Output ONLY the corrected definition of the function `{function_name}` as plain Python code (no fences, no extra text).\n"
-            "- Keep the function small and focused; include a concise docstring.\n"
+            "- Keep the function focused; include a concise docstring.\n"
             "- Preserve the function signature unless the traceback proves it must change.\n\n"
             f"FUNCTION TO FIX:\n{bad_function_src}\n\n"
             f"ERROR TRACEBACK:\n{error_text}\n\n"
