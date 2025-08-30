@@ -4544,7 +4544,7 @@ class ChatGUI:
 
         m = re.search(pat, script_text)
         return m.group(0) if m else ""
-
+ 
     @staticmethod
     def replace_function_block(script_text: str, func_name: str, new_func_src: str) -> str:
         pat = rf"(?ms)^\s*(?:async\s+)?def\s+{re.escape(func_name)}\s*\([^)]*\)\s*:[\s\S]*?(?=^\s*(?:async\s+)?def\s+\w+\s*\(|^\s*if\s+__name__\s*==\s*['\"]__main__['\"]\s*:|\Z)"
