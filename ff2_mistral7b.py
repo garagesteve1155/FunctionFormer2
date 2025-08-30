@@ -48,6 +48,69 @@ def _init_hf_model():
 
 model = _init_hf_model()
 
+# === Framework Mode (templates with outline + code) ===
+FRAMEWORK_MODE: bool = False
+FRAMEWORK_INFO: dict | None = None
+FRAMEWORKS_DIR = os.path.join(os.path.dirname(__file__), "frameworks")
+
+def _read_text(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def _parse_framework_blob(blob: str) -> tuple[str, str]:
+    """
+    Accepts either JSON: {"outline":"...","code":"..."} or text with OUTLINE/CODE markers.
+    Returns (outline_text, code_text). Raises ValueError if not parseable.
+    """
+    s = blob.strip()
+    # JSON first
+    try:
+        data = json.loads(s)
+        if isinstance(data, dict) and "outline" in data and "code" in data:
+            return str(data["outline"]).strip(), str(data["code"]).strip()
+    except Exception:
+        pass
+
+    # Marker formats (robust): === OUTLINE === ... === CODE === ...
+    # or lines starting with "OUTLINE:" and "CODE:" on their own.
+    m = re.search(r"(?s)^\s*(?:=+\s*OUTLINE\s*=+|OUTLINE\s*:)\s*(.*?)\s*(?:=+\s*CODE\s*=+|CODE\s*:)\s*(.+)\s*$", s, flags=re.I)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+
+    # Fallback: try simple split tokens
+    parts = re.split(r"(?i)^\s*CODE\s*:\s*$", s, maxsplit=1, flags=re.M)
+    if len(parts) == 2:
+        outline = re.sub(r"(?i)^\s*OUTLINE\s*:\s*$", "", parts[0], flags=re.M).strip()
+        code = parts[1].strip()
+        if outline and code:
+            return outline, code
+
+    raise ValueError("Framework file not in a recognized format. Use JSON with {'outline','code'} or OUTLINE/CODE markers.")
+
+def discover_frameworks() -> list[dict]:
+    """
+    Scans ./frameworks for candidate files.
+    Accepts: .json, .txt, .md, .pyfw (any text we can parse).
+    Returns: [{"name","path","outline","code"}]
+    """
+    items: list[dict] = []
+    if not os.path.isdir(FRAMEWORKS_DIR):
+        return items
+    for name in os.listdir(FRAMEWORKS_DIR):
+        if not any(name.lower().endswith(ext) for ext in (".json", ".txt")):
+            continue
+        p = os.path.join(FRAMEWORKS_DIR, name)
+        try:
+            outline, code = _parse_framework_blob(_read_text(p))
+            items.append({
+                "name": os.path.splitext(name)[0],
+                "path": p,
+                "outline": outline,
+                "code": code
+            })
+        except Exception:
+            continue
+    return items
 
 # === Helpers ===
 CHAT_HISTORY = []   # (prompt, final_answer) pairs – ONLY these go in history
@@ -1000,10 +1063,22 @@ def llm(prompt: str, **gen_kwargs) -> str:
             wrap = inst_first if idx == 0 else inst_later
             segs.append(f"{wrap(u)}{a.strip()} ")
         # Always prepend the full outline if it exists
+        # Add framework guidance (if active) + always include outline when present
+        fw_note = ""
+        if globals().get("FRAMEWORK_MODE", False):
+            fw_note = (
+                "FRAMEWORK MODE IS ACTIVE.\n"
+                "- A framework baseline (outline + code) is already present in this conversation as the reference outline and current script.\n"
+                "- Do NOT skip any section: when asked for a section, generate the complete section even if it ends up identical to the baseline; only that section, no extras.\n"
+                "- Treat existing outline/code as a starting point that may be modified to fit the goal. You MAY add helpers inside of the function if required by the goal.\n"
+            )
         if FULL_OUTLINE:
-            prompt_with_outline = f"(REFERENCE OUTLINE for entire script, always consider this when answering):\n{FULL_OUTLINE}\n\n{prompt}"
+            user_content = (
+                (fw_note + "\n") if fw_note else "" +
+                f"(REFERENCE OUTLINE for entire script, always consider this when answering):\n{FULL_OUTLINE}\n\n{prompt}"
+            )
         else:
-            prompt_with_outline = prompt
+            user_content = (fw_note + "\n" + prompt) if fw_note else prompt
         segs.append(inst_later(prompt_with_outline) if pairs else inst_first(prompt_with_outline))
         return "".join(segs)
 
@@ -1714,6 +1789,149 @@ class ChatGUI:
             win.geometry(f"+{x}+{y}")
         except Exception:
             pass
+    def open_framework_picker(self, on_done=None):
+        """
+        Modal chooser shown right after the user submits a goal.
+        Lets them pick a framework (outline+code) or continue with no framework.
+        """
+        fw_list = discover_frameworks()
+        win = tk.Toplevel(self.root)
+        win.title("Choose a Framework (optional)")
+        try:
+            win.configure(bg=self.BG)
+        except Exception:
+            pass
+        win.transient(self.root)
+        win.grab_set()
+
+        info = tk.Label(win, text="Optionally select a framework. It preloads an outline and matching code.\nYou can still add/modify sections normally.",
+                        justify="left")
+        try:
+            info.configure(bg=self.BG, fg=self.FG, font=("Consolas", 10, "bold"), wraplength=640)
+        except Exception:
+            pass
+        info.pack(padx=12, pady=(12, 8), anchor="w")
+
+        # list + preview
+        frame = tk.Frame(win)
+        try:
+            frame.configure(bg=self.BG)
+        except Exception:
+            pass
+        frame.pack(padx=12, pady=(0, 10), fill="both", expand=True)
+
+        lb = tk.Listbox(frame, height=10)
+        try:
+            lb.configure(bg=self.BG_PANEL, fg=self.FG, selectbackground=self.SELECTION, relief="flat")
+        except Exception:
+            pass
+        lb.grid(row=0, column=0, sticky="nswe", padx=(0, 8))
+
+        pv_frame, pv = self._cool_scrolled_text(frame, wrap="word", width=72, height=16)
+        pv_frame.grid(row=0, column=1, sticky="nswe")
+
+        frame.grid_columnconfigure(0, weight=0)
+        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
+
+        names = ["(No framework)"] + [fw["name"] for fw in fw_list]
+        for n in names:
+            lb.insert("end", n)
+        lb.selection_set(0)
+
+        def refresh_preview(_evt=None):
+            idxs = lb.curselection()
+            if not idxs:
+                return
+            idx = idxs[0]
+            pv.configure(state="normal")
+            pv.delete("1.0", "end")
+            if idx == 0:
+                pv.insert("1.0", "No framework. The tool will build from a blank outline and empty script.")
+            else:
+                fw = fw_list[idx - 1]
+                preview = (
+                    "=== OUTLINE (preview) ===\n" + fw["outline"][:2000] +
+                    ("\n...\n" if len(fw["outline"]) > 2000 else "") +
+                    "\n\n=== CODE (preview) ===\n" + fw["code"][:2000] +
+                    ("\n...\n" if len(fw["code"]) > 2000 else "")
+                )
+                pv.insert("1.0", preview)
+            pv.configure(state="disabled")
+
+        lb.bind("<<ListboxSelect>>", refresh_preview)
+        refresh_preview()
+
+        btn_row = tk.Frame(win)
+        try:
+            btn_row.configure(bg=self.BG)
+        except Exception:
+            pass
+        btn_row.pack(padx=12, pady=(0, 12), anchor="e")
+
+        def _use():
+            idxs = lb.curselection()
+            if not idxs:
+                return
+            idx = idxs[0]
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            win.destroy()
+            if idx == 0:
+                # no framework
+                self.append_display("Framework: none selected. Proceeding normally.", "response")
+                if callable(on_done): on_done()
+                return
+
+            fw = fw_list[idx - 1]
+            self.apply_framework(fw)
+            if callable(on_done): on_done()
+
+        def _skip():
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            win.destroy()
+            self.append_display("Framework selection skipped.", "response")
+            if callable(on_done): on_done()
+
+        use_btn = tk.Button(btn_row, text="Use Selected Framework", command=_use)
+        skip_btn = tk.Button(btn_row, text="Continue Without", command=_skip)
+        for b in (use_btn, skip_btn):
+            try:
+                b.configure(bg=self.ACCENT_BG, fg=self.FG, activebackground=self.ACCENT,
+                            activeforeground=self.BG, relief="flat", bd=0, padx=12, pady=6,
+                            font=("Consolas", 10, "bold"))
+            except Exception:
+                pass
+        skip_btn.pack(side="right")
+        use_btn.pack(side="right", padx=(0, 8))
+
+        # center-ish
+        win.update_idletasks()
+        try:
+            x = self.root.winfo_rootx() + max(20, (self.root.winfo_width() - win.winfo_width()) // 2)
+            y = self.root.winfo_rooty() + max(20, (self.root.winfo_height() - win.winfo_height()) // 3)
+            win.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+    def apply_framework(self, fw: dict):
+        """
+        Activate framework mode and preload outline + code into the editors.
+        """
+        global FRAMEWORK_MODE, FRAMEWORK_INFO, FULL_OUTLINE, SCRIPT_LINES
+        FRAMEWORK_MODE = True
+        FRAMEWORK_INFO = fw
+        FULL_OUTLINE = (fw.get("outline") or "").strip()
+        SCRIPT_LINES = (fw.get("code") or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+        self.publish_outline(FULL_OUTLINE, "framework:loaded")
+        self.refresh_script_editor()
+        self.append_display(f"Framework selected: {fw.get('name','(unnamed)')}", "response")
+
     def open_confirm_popup(self, title: str, message: str, button_label: str, on_confirm, on_cancel=None):
         """
         Simple modal confirm dialog with a single primary button and optional cancel.
@@ -1850,8 +2068,15 @@ class ChatGUI:
         GOAL_SPEC = text.strip()
         self.append_display("Goal received.", "prompt")
         self.update_goal_box()
-        # Kick off the existing interview flow (unchanged prompts)
-        self.start_goal_interview(GOAL_SPEC)
+
+        # Show framework picker now; when it closes, proceed to interview.
+        def _after_fw():
+            self.send_btn.config(text="Submit Answer (Ctrl+Enter)", state="disabled")
+            self.start_goal_interview(GOAL_SPEC)
+
+        self.open_framework_picker(on_done=_after_fw)
+        return
+
 
 
     def _init_scrollbar_styles(self, style: ttk.Style):
@@ -2656,39 +2881,62 @@ class ChatGUI:
                     final_code = maybe_fixed_final
 
             if final_code:
-                cleaned_lines = []
-                for ln in final_code.splitlines():
-                    stripped = ln.strip()
-                    if stripped.startswith("#") and not stripped.lstrip("#").strip() == "":
-                        continue
-                    cleaned_lines.append(ln)
-                SCRIPT_LINES.extend(cleaned_lines)
+                if globals().get("FRAMEWORK_MODE", False):
+                    # Replace the corresponding section in-place instead of appending
+                    updated_script = script_so_far
+                    if section_kind == "imports":
+                        updated_script = self.replace_imports_block(updated_script, final_code)
+                        label = "IMPORTS"
+                    elif section_kind == "globals":
+                        updated_script = self.replace_globals_block(updated_script, final_code)
+                        label = "GLOBALS"
+                    elif section_kind == "function":
+                        fname = section_spec.get("name", "") if isinstance(section_spec, dict) else ""
+                        if fname:
+                            existing = self.extract_function_block(updated_script, fname)
+                            if existing:
+                                updated_script = self.replace_function_block(updated_script, fname, final_code)
+                            else:
+                                # Insert before main() if present, else append
+                                main_blk = self.extract_main_block(updated_script)
+                                if main_blk and main_blk in updated_script:
+                                    idx = updated_script.find(main_blk)
+                                    updated_script = updated_script[:idx].rstrip() + "\n\n" + final_code.rstrip() + "\n\n" + updated_script[idx:]
+                                else:
+                                    updated_script = updated_script.rstrip() + "\n\n" + final_code.rstrip() + "\n"
+                        label = fname or "function"
+                    else:  # main
+                        updated_script = self.replace_main_block(updated_script, ensure_main_guard(final_code))
+                        label = "MAIN"
 
-                # Reflect the updated script into the editable Script section
-                full_script_text = join_script(SCRIPT_LINES)
-                def _set_script_text(s=full_script_text):
-                    try:
-                        self.script_editor.delete("1.0", "end")
-                        self.script_editor.insert("1.0", s)
-                        self.script_editor.edit_modified(False)
-                    except Exception:
-                        pass
-                self.root.after(0, _set_script_text)
+                    SCRIPT_LINES = updated_script.splitlines()
+                    self.refresh_script_editor()
+                    self.root.after(0, lambda: self.append_display(f"Generated (replaced) section: {label}", "response"))
 
-                CHAT_HISTORY.append((
-                    f"Goal:\n{goal}\n\n(Truncated script omitted here)\n\nProduce the next section: {section_kind}",
-                    final_code
-                ))
+                else:
+                    # Original behavior: append
+                    cleaned_lines = []
+                    for ln in final_code.splitlines():
+                        stripped = ln.strip()
+                        if stripped.startswith("#") and not stripped.lstrip("#").strip() == "":
+                            continue
+                        cleaned_lines.append(ln)
+                    SCRIPT_LINES.extend(cleaned_lines)
 
-                label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict)
-                         else section_kind.upper())
-                self.root.after(0, lambda: self.append_display(f"Generated and integrated section: {label}", "response"))
+                    full_script_text = join_script(SCRIPT_LINES)
+                    def _set_script_text(s=full_script_text):
+                        try:
+                            self.script_editor.delete("1.0", "end")
+                            self.script_editor.insert("1.0", s)
+                            self.script_editor.edit_modified(False)
+                        except Exception:
+                            pass
+                    self.root.after(0, _set_script_text)
 
-                SECTION_INDEX += 1
-                self.root.after(0, self.prog_inc)
+                    label = (section_spec.get("name") if section_kind == "function" and isinstance(section_spec, dict)
+                             else section_kind.upper())
+                    self.root.after(0, lambda: self.append_display(f"Generated and integrated section: {label}", "response"))
 
-                if SECTION_INDEX >= len(SECTIONS_PLAN):
-                    self.auto_running = False
 
             self.root.after(0, self.finish_cycle)
         finally:
