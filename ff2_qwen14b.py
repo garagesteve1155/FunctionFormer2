@@ -15,7 +15,7 @@ def has_function(script_text: str, name: str) -> bool:
     return any(isinstance(n, ast.FunctionDef) and n.name == name for n in tree.body)
 
 # === Configuration ===
-BASE_MODEL_PATH = "C:/Path/To/Your/Model/Folder/qwen2-5_14b_instruct"
+BASE_MODEL_PATH = "C:/Path/To/Your/Model/Folder/qwen14b"
 
 # === CUDA + model init ===
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -1963,11 +1963,123 @@ class ChatGUI:
             # Re-open until we get something non-empty
             self.show_goal_popup()
             return
-        GOAL_SPEC = text.strip()
+
+        base_goal = text.strip()
         self.append_display("Goal received.", "prompt")
-        self.update_goal_box()
-        # Kick off the existing interview flow (unchanged prompts)
-        self.start_goal_interview(GOAL_SPEC)
+
+        # Popup with checkboxes for script options; choices will be appended to GOAL_SPEC
+        win = tk.Toplevel(self.root)
+        win.title("Script Options")
+        try:
+            win.configure(bg=self.BG)
+        except Exception:
+            pass
+        win.transient(self.root)
+        win.grab_set()
+
+        lbl = tk.Label(
+            win,
+            text="Choose what the script should include. These choices will be added a couple lines below your goal.",
+            justify="left"
+        )
+        try:
+            lbl.configure(bg=self.BG, fg=self.FG, font=("Consolas", 10, "bold"), wraplength=520)
+        except Exception:
+            pass
+        lbl.pack(padx=12, pady=(12, 6), anchor="w")
+
+        # Options: include commonly requested script traits
+        opts = [
+            ("Graphic Interface", "GUI"),
+            ("Command-line interface (CLI)", "CLI"),
+            ("Offline only (no internet access)", "Offline"),
+            ("Use GPU/accelerator if available", "GPU"),
+            ("Use multithreading", "Threads"),
+            ("Save/load files (persistence)", "Persistence"),
+            ("Include logging/verbosity", "Logging"),
+        ]
+
+        vars_list = []
+        grid = tk.Frame(win)
+        try:
+            grid.configure(bg=self.BG)
+        except Exception:
+            pass
+        grid.pack(padx=12, pady=(0, 8), fill="both", expand=True)
+
+        for i, (label, short) in enumerate(opts):
+            v = tk.BooleanVar(value=False)
+            cb = tk.Checkbutton(grid, text=label, variable=v, anchor="w")
+            try:
+                cb.configure(
+                    bg=self.BG,
+                    fg=self.FG,
+                    selectcolor=self.BG_PANEL,
+                    activebackground=self.ACCENT_BG,
+                    activeforeground=self.FG,
+                    highlightthickness=0
+                )
+            except Exception:
+                pass
+            r, c = divmod(i, 2)
+            cb.grid(row=r, column=c, sticky="w", padx=6, pady=2)
+            vars_list.append((short, v))
+
+        for c in range(2):
+            grid.grid_columnconfigure(c, weight=1)
+
+        def _submit():
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            win.destroy()
+            lines = [f"- {name}: " + ("Yes" if var.get() else "No") for name, var in vars_list]
+            GOAL_SPEC = base_goal + "\n\nSCRIPT OPTIONS:\n" + "\n".join(lines)
+            self.update_goal_box()
+            # Kick off the existing interview flow with the augmented goal
+            self.start_goal_interview(GOAL_SPEC)
+
+        btn_row = tk.Frame(win)
+        try:
+            btn_row.configure(bg=self.BG)
+        except Exception:
+            pass
+        btn_row.pack(padx=12, pady=(0, 12), anchor="e")
+
+        ok_btn = tk.Button(btn_row, text="Use These Options", command=_submit)
+        try:
+            ok_btn.configure(
+                bg=self.ACCENT_BG,
+                fg=self.FG,
+                activebackground=self.ACCENT,
+                activeforeground=self.BG,
+                relief="flat",
+                bd=0,
+                padx=12,
+                pady=6,
+                font=("Consolas", 10, "bold")
+            )
+        except Exception:
+            pass
+        ok_btn.pack(side="right")
+
+        # Treat close as submit (defaults to all unchecked)
+        def _cancel():
+            _submit()
+
+        win.bind("<Return>", lambda e: _submit())
+        win.protocol("WM_DELETE_WINDOW", _cancel)
+
+        # Center the popup relative to the main window
+        win.update_idletasks()
+        try:
+            x = self.root.winfo_rootx() + max(20, (self.root.winfo_width() - win.winfo_width()) // 2)
+            y = self.root.winfo_rooty() + max(20, (self.root.winfo_height() - win.winfo_height()) // 3)
+            win.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
 
     def _init_scrollbar_styles(self, style: ttk.Style):
         # Arrowless, slim, neon thumb on dark trough
@@ -2168,8 +2280,11 @@ class ChatGUI:
                     data = _safe_json_loads(blob, {})
                     updated = (data.get("updated_goal") or raw).strip()
 
+                    # Use ONLY the rewritten goal from this point forward
+                    global GOAL_SPEC, CHAT_HISTORY
                     self.working_goal = updated
                     GOAL_SPEC = self.working_goal
+                    CHAT_HISTORY.clear()  # prevent any prior prompts containing the original goal from being reused
 
                     self.root.after(0, lambda: self.append_display("Updated goal:\n" + self.working_goal, "response"))
                     self.root.after(0, self.update_goal_box)
@@ -2179,6 +2294,7 @@ class ChatGUI:
                 except Exception as e:
                     msg = f"Failed to synthesize refined goal: {e}"
                     self.root.after(0, self.append_display, msg, "response")
+
 
             threading.Thread(target=_finalize, daemon=True).start()
             return
