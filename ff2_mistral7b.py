@@ -1853,6 +1853,7 @@ class ChatGUI:
         # Kick off the existing interview flow (unchanged prompts)
         self.start_goal_interview(GOAL_SPEC)
 
+
     def _init_scrollbar_styles(self, style: ttk.Style):
         # Arrowless, slim, neon thumb on dark trough
         style.layout(
@@ -2052,8 +2053,11 @@ class ChatGUI:
                     data = _safe_json_loads(blob, {})
                     updated = (data.get("updated_goal") or raw).strip()
 
+                    # Use ONLY the rewritten goal from this point forward
+                    global GOAL_SPEC, CHAT_HISTORY
                     self.working_goal = updated
                     GOAL_SPEC = self.working_goal
+                    CHAT_HISTORY.clear()  # prevent any prior prompts containing the original goal from being reused
 
                     self.root.after(0, lambda: self.append_display("Updated goal:\n" + self.working_goal, "response"))
                     self.root.after(0, self.update_goal_box)
@@ -2063,6 +2067,7 @@ class ChatGUI:
                 except Exception as e:
                     msg = f"Failed to synthesize refined goal: {e}"
                     self.root.after(0, self.append_display, msg, "response")
+
 
             threading.Thread(target=_finalize, daemon=True).start()
             return
